@@ -99,24 +99,6 @@ python aes_gcm_file_encryptor.py /path/to/file -enc -key "another16bytkey" --thr
 
 ---
 
-## **License**
-
-This project is licensed under the [MIT License](LICENSE).
-
----
-
-## **Contributing**
-
-1. **Fork** the repo.
-2. **Create** your feature branch (`git checkout -b feature/awesome-feature`).
-3. **Commit** your changes (`git commit -am 'Add new feature'`).
-4. **Push** to the branch (`git push origin feature/awesome-feature`).
-5. **Create** a new Pull Request.
-
-Contributions and bug reports are welcome! Feel free to open an issue for any problem you encounter.
-
----
-
 ## **File Name**
 
 **`aes_gcm_file_encryptor.py`**

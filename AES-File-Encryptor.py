@@ -59,36 +59,62 @@ def process_file(file_path, mode, key):
         return
 
     try:
-        # Prepare cipher objects and output paths
         if mode == 'encrypt':
+            # Prepare cipher for encryption
             cipher = AES.new(key, AES.MODE_GCM)
             output_path = file_path + '.enc'
-        else:  # decrypt mode
-            with open(file_path, 'rb') as f_in:
-                nonce = f_in.read(16)
-                tag = f_in.read(16)
-                cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
-            output_path = file_path[:-4]  # remove '.enc'
 
-        with open(file_path, 'rb') as f_in, open(output_path, 'wb') as f_out:
-            # Write nonce if encrypting
-            if mode == 'encrypt':
+            with open(file_path, 'rb') as f_in, open(output_path, 'wb') as f_out:
+                # Write the nonce (16 bytes)
                 f_out.write(cipher.nonce)
 
-            # Process file in chunks
-            while chunk := f_in.read(CHUNK_SIZE):
-                if mode == 'encrypt':
-                    processed_chunk = cipher.encrypt(chunk)
-                else:  # decrypt
-                    processed_chunk = cipher.decrypt(chunk)
-                f_out.write(processed_chunk)
+                # Read plaintext in chunks, encrypt, and write ciphertext
+                while True:
+                    chunk = f_in.read(CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    ciphertext_chunk = cipher.encrypt(chunk)
+                    f_out.write(ciphertext_chunk)
 
-            # Write tag if encrypting
-            if mode == 'encrypt':
+                # After all plaintext is processed, write the tag (16 bytes)
                 tag = cipher.digest()
                 f_out.write(tag)
 
-        # Remove the original file
+        else:  # mode == 'decrypt'
+            output_path = file_path[:-4]  # remove '.enc'
+            
+            # Open encrypted file for reading
+            with open(file_path, 'rb') as f_in:
+                # Read the first 16 bytes for nonce
+                nonce = f_in.read(16)
+
+                # Determine the correct size of ciphertext
+                file_size = os.path.getsize(file_path)
+                # Total file size = 16 bytes (nonce) + X bytes (ciphertext) + 16 bytes (tag)
+                # So ciphertext size = file_size - 16 (nonce) - 16 (tag) = file_size - 32
+                ciphertext_size = file_size - 32
+
+                cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+
+                with open(output_path, 'wb') as f_out:
+                    total_read = 0
+
+                    # Read the ciphertext (minus the tag) in chunks
+                    while total_read < ciphertext_size:
+                        to_read = min(CHUNK_SIZE, ciphertext_size - total_read)
+                        chunk = f_in.read(to_read)
+                        if not chunk:
+                            break
+                        plaintext_chunk = cipher.decrypt(chunk)
+                        f_out.write(plaintext_chunk)
+                        total_read += len(chunk)
+
+                    # Read the final 16 bytes as the tag
+                    tag = f_in.read(16)
+                    # Verify tag
+                    cipher.verify(tag)
+
+        # Remove the original file after successful encryption/decryption
         os.remove(file_path)
 
         # Update overall progress

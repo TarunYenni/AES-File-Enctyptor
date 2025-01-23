@@ -1,11 +1,9 @@
 import os
 import argparse
-import threading
 from termcolor import colored
 from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
 from concurrent.futures import ThreadPoolExecutor
-import sys
 from threading import Lock
 
 DEFAULT_KEY = b'your_secret_key_16_bytes'  # Replace with a secure 16-byte key
@@ -32,6 +30,25 @@ def should_skip_file(file_path):
     """Checks if this script file itself should be skipped."""
     script_path = os.path.abspath(__file__)
     return os.path.abspath(file_path) == script_path
+
+
+def get_original_extension(file_path, mode):
+    """
+    Return the 'original' file extension (without leading dot), based on the mode:
+      - For encryption, return the current file's extension (e.g. 'txt').
+      - For decryption, if file ends with .enc, remove '.enc' first, then get extension 
+        from the remainder (e.g. 'example.txt.enc' -> 'txt').
+    """
+    if mode == 'encrypt':
+        # Normal file extension
+        return os.path.splitext(file_path)[1].lstrip('.').lower()
+    else:  # mode == 'decrypt'
+        if file_path.endswith('.enc'):
+            # Remove the trailing ".enc"
+            base = file_path[:-4]
+            return os.path.splitext(base)[1].lstrip('.').lower()
+        # If somehow not ending in .enc, it has no valid original extension for decryption
+        return ''
 
 
 def process_file(file_path, mode, key):
@@ -90,8 +107,8 @@ def process_file(file_path, mode, key):
 
                 # Determine the correct size of ciphertext
                 file_size = os.path.getsize(file_path)
-                # Total file size = 16 bytes (nonce) + X bytes (ciphertext) + 16 bytes (tag)
-                # So ciphertext size = file_size - 16 (nonce) - 16 (tag) = file_size - 32
+                # total = 16 bytes (nonce) + X bytes (ciphertext) + 16 bytes (tag)
+                # => X = file_size - 32
                 ciphertext_size = file_size - 32
 
                 cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
@@ -134,10 +151,11 @@ def process_file(file_path, mode, key):
             print(colored(f"[ERROR] Could not process file: {file_path}\nReason: {e}", 'red'))
 
 
-def process_folder(folder_path, mode, key, max_threads=10):
+def process_folder(folder_path, mode, key, max_threads=10, extension_list=None):
     """
     Recursively processes all files in the specified folder 
     using a ThreadPoolExecutor with a configurable number of worker threads.
+    Only processes files if they match the 'original' extension in `extension_list` (if provided).
     """
     global progress
 
@@ -152,6 +170,13 @@ def process_folder(folder_path, mode, key, max_threads=10):
                 with output_lock:
                     print(colored(f"[SKIP] Out-of-bound file: {file_path}", 'yellow'))
                 continue
+
+            # If user specified extension_list, check the original extension
+            if extension_list:
+                original_ext = get_original_extension(file_path, mode)
+                if original_ext not in extension_list:
+                    continue
+
             all_files.append(file_path)
 
     # Set total files for progress tracking
@@ -178,9 +203,12 @@ def main():
                         help="Custom 16-byte key for encryption/decryption.")
     parser.add_argument('--threads', type=int, default=10,
                         help="Number of threads to use for parallel processing.")
+    parser.add_argument('-ext', type=str, default=None,
+                        help="Comma-separated list of file extensions to process (e.g. 'txt,json').")
 
     args = parser.parse_args()
 
+    # Check if path exists
     if not os.path.exists(args.path):
         print(colored("[ERROR] The specified path does not exist.", 'red'))
         return
@@ -200,17 +228,30 @@ def main():
         print(colored("[INFO] Please specify -enc to encrypt or -dec to decrypt.", 'yellow'))
         return
 
+    # Parse extension list if provided
+    extension_list = None
+    if args.ext:
+        # E.g. '-ext txt,json'
+        extension_list = [ext.strip().lower() for ext in args.ext.split(',')]
+
     # Process single file or entire folder
     if os.path.isfile(args.path):
         print(colored(f"[START] Processing file: {args.path}", 'blue'))
         if is_within_boundary(args.path, args.path):
+            # If a single file is given, we must also check the extension if specified
+            if extension_list:
+                original_ext = get_original_extension(args.path, mode)
+                if original_ext not in extension_list:
+                    print(colored("[SKIP] File extension not in provided list.", 'yellow'))
+                    return
+
             progress["total"] = 1
             process_file(args.path, mode, key)
         else:
             print(colored("[ERROR] The file is outside the allowed boundary.", 'red'))
     else:
         print(colored(f"[START] Processing folder: {args.path}", 'blue'))
-        process_folder(args.path, mode, key, max_threads=args.threads)
+        process_folder(args.path, mode, key, max_threads=args.threads, extension_list=extension_list)
 
     # Print summary of all processed files
     print(colored("\n[SUMMARY] Processing results:", 'blue'))
